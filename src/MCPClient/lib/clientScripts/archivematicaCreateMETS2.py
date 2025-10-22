@@ -51,25 +51,6 @@ from databaseFunctions import getUTCDate
 from sharedVariablesAcrossModules import sharedVariablesAcrossModules
 sharedVariablesAcrossModules.globalErrorCount = 0
 
-from optparse import OptionParser
-parser = OptionParser()
-parser.add_option("-s",  "--baseDirectoryPath", action="store", dest="baseDirectoryPath", default="")
-parser.add_option("-b",  "--baseDirectoryPathString", action="store", dest="baseDirectoryPathString", default="SIPDirectory") #transferDirectory/
-parser.add_option("-f",  "--fileGroupIdentifier", action="store", dest="fileGroupIdentifier", default="") #transferUUID/sipUUID
-parser.add_option("-t",  "--fileGroupType", action="store", dest="fileGroupType", default="sipUUID") #
-parser.add_option("-x",  "--xmlFile", action="store", dest="xmlFile", default="")
-parser.add_option("-a",  "--amdSec", action="store_true", dest="amdSec", default=False)
-(opts, args) = parser.parse_args()
-
-
-baseDirectoryPath = opts.baseDirectoryPath
-XMLFile = opts.xmlFile
-includeAmdSec = opts.amdSec
-baseDirectoryPathString = "%%%s%%" % (opts.baseDirectoryPathString)
-fileGroupIdentifier = opts.fileGroupIdentifier
-fileGroupType = opts.fileGroupType
-includeAmdSec = opts.amdSec
-
 #Global Variables
 
 globalFileGrps = {}
@@ -224,7 +205,7 @@ def createDmdSecsFromCSVParsedMetadata(metadata):
     return ret
 
 
-def createDublincoreDMDSecFromDBData(type, id):
+def createDublincoreDMDSecFromDBData(type, id, baseDirectoryPath):
     dc = getDublinCore(type, id)
     if dc is None:
         transfers = os.path.join(baseDirectoryPath, "objects/metadata/transfers/")
@@ -459,7 +440,7 @@ def createDigiprovMD(fileUUID):
             etree.SubElement(linkingAgentIdentifier, ns.premisBNS + "linkingAgentIdentifierValue").text = agent.identifiervalue
     return ret
 
-def createDigiprovMDAgents():
+def createDigiprovMDAgents(fileGroupIdentifier=None):
     ret = []
     global globalDigiprovMDCounter
     # AGENTS
@@ -503,7 +484,7 @@ def createDigiprovMDAgents():
 
 
 
-def getAMDSec(fileUUID, filePath, use, type, id, transferUUID, itemdirectoryPath, typeOfTransfer):
+def getAMDSec(fileUUID, filePath, use, type, id, transferUUID, itemdirectoryPath, typeOfTransfer, baseDirectoryPath):
     global globalAmdSecCounter
     global globalRightsMDCounter
     global globalDigiprovMDCounter
@@ -517,7 +498,7 @@ def getAMDSec(fileUUID, filePath, use, type, id, transferUUID, itemdirectoryPath
     AMD.append(createTechMD(fileUUID))
 
     if use == "original":
-        metadataAppliesToList = [(fileUUID, FileMetadataAppliesToType), (fileGroupIdentifier, SIPMetadataAppliesToType), (transferUUID.__str__(), TransferMetadataAppliesToType)]
+        metadataAppliesToList = [(fileUUID, FileMetadataAppliesToType), (transferUUID, SIPMetadataAppliesToType), (transferUUID.__str__(), TransferMetadataAppliesToType)]
         for a in archivematicaGetRights(metadataAppliesToList, fileUUID):
             globalRightsMDCounter +=1
             rightsMD = etree.SubElement(AMD, ns.metsBNS + "rightsMD")
@@ -535,7 +516,7 @@ def getAMDSec(fileUUID, filePath, use, type, id, transferUUID, itemdirectoryPath
                 rightsMD.append(a)
 
         elif typeOfTransfer == "TRIM":
-            digiprovMD = getTrimFileAmdSec(baseDirectoryPath, fileGroupIdentifier, fileUUID)
+            digiprovMD = getTrimFileAmdSec(baseDirectoryPath, transferUUID, fileUUID)
             globalDigiprovMDCounter += 1
             digiprovMD.set("ID", "digiprovMD_"+ globalDigiprovMDCounter.__str__())
             AMD.append(digiprovMD)
@@ -543,11 +524,11 @@ def getAMDSec(fileUUID, filePath, use, type, id, transferUUID, itemdirectoryPath
     for a in createDigiprovMD(fileUUID):
         AMD.append(a)
 
-    for a in createDigiprovMDAgents():
+    for a in createDigiprovMDAgents(transferUUID):
         AMD.append(a)
     return ret
 
-def getIncludedStructMap():
+def getIncludedStructMap(baseDirectoryPath):
     global fileNameToFileID
     global trimStructMap
     global trimStructMapObjects
@@ -590,7 +571,7 @@ def getIncludedStructMap():
 
 #DMDID="dmdSec_01" for an object goes in here
 #<file ID="file1-UUID" GROUPID="G1" DMDID="dmdSec_02" ADMID="amdSec_01">
-def createFileSec(directoryPath, parentDiv):
+def createFileSec(directoryPath, parentDiv, baseDirectoryPath, baseDirectoryName, fileGroupIdentifier, fileGroupType, includeAmdSec=True):
     global fileNameToFileID
     global trimStructMap
     global trimStructMapObjects
@@ -618,11 +599,11 @@ def createFileSec(directoryPath, parentDiv):
     for item in directoryContents:
         itemdirectoryPath = os.path.join(directoryPath, item)
         if os.path.isdir(itemdirectoryPath):
-            createFileSec(itemdirectoryPath, structMapDiv)
+            createFileSec(itemdirectoryPath, structMapDiv, baseDirectoryPath, baseDirectoryName, fileGroupIdentifier, fileGroupType, includeAmdSec)
         elif os.path.isfile(itemdirectoryPath):
             myuuid=""
             DMDIDS=""
-            directoryPathSTR = itemdirectoryPath.replace(baseDirectoryPath, baseDirectoryPathString, 1)
+            directoryPathSTR = itemdirectoryPath.replace(baseDirectoryPath, baseDirectoryName, 1)
 
             kwargs = {
                 "removedtime__isnull": True,
@@ -728,7 +709,7 @@ def createFileSec(directoryPath, parentDiv):
 
 
             elif use == "service":
-                fileFileIDPath = itemdirectoryPath.replace(baseDirectoryPath + "objects/service/", baseDirectoryPathString + "objects/")
+                fileFileIDPath = itemdirectoryPath.replace(baseDirectoryPath + "objects/service/", baseDirectoryName + "objects/")
                 objectNameExtensionIndex = fileFileIDPath.rfind(".")
                 fileFileIDPath = fileFileIDPath[:objectNameExtensionIndex + 1]
 
@@ -782,7 +763,7 @@ def createFileSec(directoryPath, parentDiv):
                 #<Flocat xlink:href="objects/file1-UUID" locType="other" otherLocType="system"/>
                 newChild(file_elem, ns.metsBNS + "FLocat", sets=[(ns.xlinkBNS +"href",directoryPathSTR), ("LOCTYPE","OTHER"), ("OTHERLOCTYPE", "SYSTEM")])
                 if includeAmdSec:
-                    AMD, ADMID = getAMDSec(myuuid, directoryPathSTR, use, fileGroupType, fileGroupIdentifier, transferUUID, itemdirectoryPath, typeOfTransfer)
+                    AMD, ADMID = getAMDSec(myuuid, directoryPathSTR, use, fileGroupType, fileGroupIdentifier, transferUUID, itemdirectoryPath, typeOfTransfer, baseDirectoryPath)
                     amdSecs.append(AMD)
                     file_elem.set("ADMID", ADMID)
 
@@ -813,7 +794,7 @@ def find_source_metadata(path):
 
     return transfer, source
 
-def create_object_metadata(struct_map):
+def create_object_metadata(struct_map, baseDirectoryPath):
     transfer_metadata_path = os.path.join(baseDirectoryPath, "objects/metadata/transfers")
     transfer, source = find_source_metadata(transfer_metadata_path)
     if not transfer and not source:
@@ -853,6 +834,24 @@ def create_object_metadata(struct_map):
 
 
 if __name__ == '__main__':
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.add_option("-s",  "--baseDirectoryPath", action="store", dest="baseDirectoryPath", default="")
+    parser.add_option("-b",  "--baseDirectoryPathString", action="store", dest="baseDirectoryPathString", default="SIPDirectory") #transferDirectory/
+    parser.add_option("-f",  "--fileGroupIdentifier", action="store", dest="fileGroupIdentifier", default="") #transferUUID/sipUUID
+    parser.add_option("-t",  "--fileGroupType", action="store", dest="fileGroupType", default="sipUUID") #
+    parser.add_option("-x",  "--xmlFile", action="store", dest="xmlFile", default="")
+    parser.add_option("-a",  "--amdSec", action="store_true", dest="amdSec", default=False)
+    (opts, args) = parser.parse_args()
+
+    baseDirectoryPath = opts.baseDirectoryPath
+    XMLFile = opts.xmlFile
+    includeAmdSec = opts.amdSec
+    baseDirectoryPathString = "%%%s%%" % (opts.baseDirectoryPathString)
+    fileGroupIdentifier = opts.fileGroupIdentifier
+    fileGroupType = opts.fileGroupType
+    includeAmdSec = opts.amdSec
+
     while False: #used to stall the mcp and stop the client for testing this module
         import time
         time.sleep(10)
@@ -863,13 +862,13 @@ if __name__ == '__main__':
         baseDirectoryPath += '/'
     structMap = etree.Element(ns.metsBNS + "structMap", TYPE='physical', ID='structMap_1', LABEL="Archivematica default")
     structMapDiv = etree.SubElement(structMap, ns.metsBNS + 'div', TYPE="Directory", LABEL=os.path.basename(baseDirectoryPath.rstrip('/')))
-    structMapDivObjects = createFileSec(os.path.join(baseDirectoryPath, "objects"), structMapDiv)
+    structMapDivObjects = createFileSec(os.path.join(baseDirectoryPath, "objects"), structMapDiv, baseDirectoryPath, baseDirectoryPathString, fileGroupIdentifier, fileGroupType, includeAmdSec)
 
-    el = create_object_metadata(structMapDivObjects)
+    el = create_object_metadata(structMapDivObjects, baseDirectoryPath)
     if el:
         amdSecs.append(el)
 
-    createFileSec(os.path.join(baseDirectoryPath, "metadata"), structMapDiv)
+    createFileSec(os.path.join(baseDirectoryPath, "metadata"), structMapDiv, baseDirectoryPath, baseDirectoryPathString, fileGroupIdentifier, fileGroupType, includeAmdSec)
 
 
     fileSec = etree.Element(ns.metsBNS + "fileSec")
@@ -891,7 +890,7 @@ if __name__ == '__main__':
 
 
 
-    dc = createDublincoreDMDSecFromDBData(SIPMetadataAppliesToType, fileGroupIdentifier)
+    dc = createDublincoreDMDSecFromDBData(SIPMetadataAppliesToType, fileGroupIdentifier, baseDirectoryPath)
     if dc != None:
         (dmdSec, ID) = dc
         structMapDivObjects.set("DMDID", ID)
@@ -905,7 +904,7 @@ if __name__ == '__main__':
 
     root.append(fileSec)
     root.append(structMap)
-    for structMapIncl in getIncludedStructMap():
+    for structMapIncl in getIncludedStructMap(baseDirectoryPath):
         root.append(structMapIncl)
     if False: #debug
         print etree.tostring(root, pretty_print=True)
