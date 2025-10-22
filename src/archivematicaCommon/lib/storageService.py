@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(filename="/tmp/archivematica.log",
     level=logging.INFO)
 
+
+class ResourceNotFound(Exception):
+    pass
+
+class BadRequest(Exception):
+    pass
+
 ######################### INTERFACE WITH STORAGE API #########################
 
 ############# HELPER FUNCTIONS #############
@@ -335,3 +342,21 @@ def request_file_deletion(uuid, user_id, user_email, reason_for_deletion):
 def post_store_aip_callback(uuid):
     api = _storage_api()
     return api.file(uuid).send_callback.post_store.get()
+
+def get_file_metadata(**kwargs):
+    api = _storage_api()
+    try:
+        return api.file.metadata.get(**kwargs)
+    except slumber.exceptions.HttpClientError:
+        raise ResourceNotFound("No file found for arguments: {}".format(kwargs))
+
+def remove_files_from_transfer(transfer_uuid):
+    api = _storage_api()
+    api.file(transfer_uuid).contents.delete()
+
+def index_backlogged_transfer_contents(transfer_uuid, file_set):
+    api = _storage_api()
+    try:
+        api.file(transfer_uuid).contents.put(file_set)
+    except slumber.exceptions.HttpClientError as e:
+        raise BadRequest("Unable to add files to transfer: {}".format(e))
